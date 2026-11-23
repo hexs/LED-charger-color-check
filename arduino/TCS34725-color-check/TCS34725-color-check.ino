@@ -7,7 +7,14 @@
 // ================= ตั้งค่า Wi-Fi =================
 const char* WIFI_SSID = "AMD Takaya Office 2.4G";
 const char* WIFI_PASS = "Takaya2026@";
-// ================================================
+
+// ================= ตั้งค่า Static IP =================
+IPAddress local_IP(10, 87, 1, 89);
+IPAddress gateway(10, 87, 1, 200);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress primaryDNS(8, 8, 8, 8);
+IPAddress secondaryDNS(1, 1, 1, 1);
+// ====================================================
 
 #define I2C_SDA 4
 #define I2C_SCL 5
@@ -60,8 +67,12 @@ void setup() {
   }
   Serial.println("พบเซนเซอร์ TCS34725 พร้อมใช้งาน");
 
-  // เชื่อมต่อ Wi-Fi
+  // เชื่อมต่อ Wi-Fi แบบ Static IP
   WiFi.mode(WIFI_STA);
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
+    Serial.println("ตั้งค่า Static IP ไม่สำเร็จ!");
+  }
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("กำลังเชื่อมต่อ Wi-Fi");
   while (WiFi.status() != WL_CONNECTED) {
