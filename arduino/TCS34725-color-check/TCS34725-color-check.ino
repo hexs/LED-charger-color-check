@@ -4,21 +4,49 @@
 #include "Adafruit_TCS34725.h"
 #include "web_page.h"
 
-// ================= ตั้งค่า Wi-Fi =================
-const char* WIFI_SSID = "AMD Takaya Office 2.4G";
-const char* WIFI_PASS = "Takaya2026@";
-
-// ================= ตั้งค่า Static IP =================
-IPAddress local_IP(10, 87, 1, 89);
-IPAddress gateway(10, 87, 1, 200);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8);
-IPAddress secondaryDNS(1, 1, 1, 1);
-// ====================================================
-
 #define I2C_SDA 4
 #define I2C_SCL 5
 #define RGB_LED_PIN 48
+
+// ================= โครงสร้างการตั้งค่า Wi-Fi =================
+struct WifiProfile {
+  const char* ssid;
+  const char* pass;
+  bool useStaticIP;
+  IPAddress localIP;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress dns1;
+  IPAddress dns2;
+};
+
+WifiProfile WIFI_LIST[] = {
+  { "AMD Takaya Office 2.4G",
+    "Takaya2026@",
+    true,
+    IPAddress(10, 87, 1, 89),
+    IPAddress(10, 87, 1, 200),
+    IPAddress(255, 255, 255, 0),
+    IPAddress(8, 8, 8, 8),
+    IPAddress(1, 1, 1, 1) },
+  { "Handwork_2.4G",
+    "Takaya2026@",
+    true,
+    IPAddress(10, 87, 1, 89),
+    IPAddress(10, 87, 1, 200),
+    IPAddress(255, 255, 255, 0),
+    IPAddress(8, 8, 8, 8),
+    IPAddress(1, 1, 1, 1) }
+};
+
+const int WIFI_COUNT = sizeof(WIFI_LIST) / sizeof(WIFI_LIST[0]);
+const unsigned long WIFI_TIMEOUT_MS = 10000;  // รอต่อแต่ละตัวสูงสุด 10 วินาที
+int currentWifiIdx = 0;
+bool wifiConnecting = false;
+bool wasWifiConnected = false;
+unsigned long wifiAttemptStart = 0;
+// =========================================================
+
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_1X);
 WebServer server(80);
@@ -54,11 +82,78 @@ bool isSensorPresent() {
 }
 
 void clearSensorData() {
-  data.r = 0; data.g = 0; data.b = 0; data.c = 0;
-  data.red = 0; data.green = 0; data.blue = 0;
+  data.r = 0;
+  data.g = 0;
+  data.b = 0;
+  data.c = 0;
+  data.red = 0;
+  data.green = 0;
+  data.blue = 0;
   data.colorTemp = 0;
   data.lux = 0;
   data.saturated = false;
+}
+
+// ================= ฟังก์ชันจัดการสลับ Wi-Fi =================
+void startWifiAttempt(int idx) {
+  currentWifiIdx = idx;
+  WifiProfile& p = WIFI_LIST[idx];
+
+  WiFi.disconnect(false);
+  delay(100);
+
+  if (p.useStaticIP) {
+    if (!WiFi.config(p.localIP, p.gateway, p.subnet, p.dns1, p.dns2)) {
+      Serial.println("ตั้งค่า Static IP ไม่สำเร็จ!");
+    }
+  } else {
+    // รีเซ็ตกลับเป็น DHCP เมื่อสลับมาจาก Wi-Fi ที่ใช้ Static IP
+    WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
+  }
+
+  Serial.print("\nกำลังลองเชื่อมต่อ Wi-Fi: ");
+  Serial.println(p.ssid);
+
+  WiFi.begin(p.ssid, p.pass);
+  wifiConnecting = true;
+  wifiAttemptStart = millis();
+}
+
+void printWifiInfo() {
+  Serial.println("\nเชื่อมต่อ Wi-Fi สำเร็จ!");
+  Serial.print("SSID:    ");
+  Serial.println(WiFi.SSID());
+  Serial.print("Web App: http://");
+  Serial.println(WiFi.localIP());
+  Serial.print("API:     http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/api/data");
+}
+
+// เรียกใน loop() เพื่อสลับ Wi-Fi อัตโนมัติหากสัญญาณหลุดโดยไม่บล็อกการทำงานของเซนเซอร์
+void handleWifiFallback() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wasWifiConnected) {
+      wasWifiConnected = true;
+      wifiConnecting = false;
+      printWifiInfo();
+    }
+    return;
+  }
+
+  // กรณีเพิ่งหลุดจาก Wi-Fi ที่เคยต่ออยู่
+  if (wasWifiConnected) {
+    wasWifiConnected = false;
+    Serial.println("Wi-Fi หลุดการเชื่อมต่อ! กำลังลองสลับไปเครือข่ายอื่น...");
+    startWifiAttempt((currentWifiIdx + 1) % WIFI_COUNT);
+    return;
+  }
+
+  // กรณียังไม่ติดและหมดเวลาของตัวปัจจุบันแล้ว ให้สลับไปตัวถัดไป
+  if (!wifiConnecting || (millis() - wifiAttemptStart >= WIFI_TIMEOUT_MS)) {
+    int nextIdx = wifiConnecting ? ((currentWifiIdx + 1) % WIFI_COUNT) : 0;
+    startWifiAttempt(nextIdx);
+  }
 }
 
 // ================= API Handlers =================
@@ -69,6 +164,7 @@ void handleRoot() {
 void handleApiData() {
   String json = "{";
   json += "\"sensor_connected\":" + String(data.connected ? "true" : "false") + ",";
+  json += "\"wifi\":{\"ssid\":\"" + WiFi.SSID() + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"},";
   json += "\"raw\":{\"r\":" + String(data.r) + ",\"g\":" + String(data.g) + ",\"b\":" + String(data.b) + ",\"c\":" + String(data.c) + "},";
   json += "\"rgb\":{\"r\":" + String((int)data.red) + ",\"g\":" + String((int)data.green) + ",\"b\":" + String((int)data.blue) + "},";
   json += "\"wavelengths_nm\":{\"b\":465,\"g\":525,\"r\":615},";
@@ -122,19 +218,29 @@ void setup() {
     Serial.println("ยังไม่พบเซนเซอร์ TCS34725 (จะคอยตรวจสอบและเชื่อมต่อใหม่อัตโนมัติ)");
   }
 
+  // ตั้งค่าโหมด Wi-Fi และไล่ลองต่อตามลำดับตอนเปิดเครื่อง
   WiFi.mode(WIFI_STA);
-  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
-    Serial.println("ตั้งค่า Static IP ไม่สำเร็จ!");
+  WiFi.setAutoReconnect(false);
+
+  for (int i = 0; i < WIFI_COUNT; i++) {
+    startWifiAttempt(i);
+    while (WiFi.status() != WL_CONNECTED && (millis() - wifiAttemptStart < WIFI_TIMEOUT_MS)) {
+      delay(500);
+      Serial.print(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      wasWifiConnected = true;
+      wifiConnecting = false;
+      printWifiInfo();
+      break;
+    }
+    Serial.println("\nเชื่อมต่อไม่สำเร็จ กำลังลองตัวถัดไป...");
   }
 
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("กำลังเชื่อมต่อ Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("ยังไม่สามารถเชื่อมต่อ Wi-Fi ได้ทั้งคู่ (จะลองเชื่อมต่อใหม่อัตโนมัติในเบื้องหลัง)");
+    wifiConnecting = false;
   }
-  Serial.println("\nเชื่อมต่อ Wi-Fi สำเร็จ!");
-  Serial.print("Web App: http://"); Serial.println(WiFi.localIP());
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/data", HTTP_GET, handleApiData);
@@ -143,6 +249,7 @@ void setup() {
 }
 
 void loop() {
+  handleWifiFallback();
   server.handleClient();
 
   if (millis() - lastReadTime >= READ_INTERVAL) {
@@ -157,7 +264,7 @@ void loop() {
       data.connected = false;
       clearSensorData();
       if (led.autoMode) {
-        updateOnboardLED(0, 0, 0); // ปิดไฟ LED เมื่อเซนเซอร์หลุด
+        updateOnboardLED(0, 0, 0);
       }
       return;
     }
@@ -177,7 +284,6 @@ void loop() {
     tcs.getRGB(&data.red, &data.green, &data.blue);
     data.colorTemp = tcs.calculateColorTemperature_dn40(data.r, data.g, data.b, data.c);
     data.lux = tcs.calculateLux(data.r, data.g, data.b);
-    // ค่าเต็มของ 50MS คือประมาณ 21504 (ถ้าใช้ 600MS คือ 65535)
     data.saturated = (data.c >= 20000 || data.r >= 20000 || data.g >= 20000 || data.b >= 20000);
 
     if (led.autoMode) {

@@ -16,6 +16,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     button.paused { background: #dc3545; }
     button.secondary { background: #6c757d; }
     button.active-mode { background: #198754; font-weight: bold; }
+    select { padding: 7px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; background: #fff; cursor: pointer; }
     .alert-banner { display: none; background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: bold; }
     .panel { background: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
     .panel-title { font-weight: bold; font-size: 14px; }
@@ -44,6 +45,19 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   <div class="controls">
     <button id="toggleBtn" onclick="togglePause()">Pause</button>
+    <label>
+      Y-Axis Scale:
+      <select id="yScaleSelect" onchange="onYScaleChange(this.value)">
+        <option value="auto" selected>Auto (Smooth)</option>
+        <option value="1000">Fix: 1,000</option>
+        <option value="2000">Fix: 2,000</option>
+        <option value="4000">Fix: 4,000</option>
+        <option value="6000">Fix: 6,000</option>
+        <option value="10000">Fix: 10,000</option>
+        <option value="25000">Fix: 25,000 (Max 50ms)</option>
+        <option value="70000">Fix: 70,000 (Max 16-bit)</option>
+      </select>
+    </label>
     <span>API: <a href="/api/data" target="_blank">/api/data</a></span>
     <span id="satWarn" class="warn">⚠️ ค่าแสงทะลุเพดาน (Saturated) กรุณาขยับหลอดออกห่าง</span>
   </div>
@@ -87,19 +101,50 @@ const char index_html[] PROGMEM = R"rawliteral(
     let currentLedMode = 'auto';
     let lastUserPickTime = 0;
 
-    const commonScales = {
-      x: {
-        type: 'linear', min: 380, max: 700,
-        offset: false,
-        title: { display: true, text: 'Wavelength (nm)' },
-        grid: { color: 'rgba(0,0,0,0.08)' }
-      },
-      y: {
-        min: 0, suggestedMax: 1100,
-        title: { display: true, text: 'Raw Intensity' },
-        grid: { color: 'rgba(0,0,0,0.08)' }
-      }
-    };
+    // ระดับสเกลแกน Y ที่หารลงตัวเพื่อให้เส้นย่อยทั้ง 2 กราฟตรงกันเป๊ะ
+    const Y_LEVELS = [
+      { max: 1000,  step: 200 },
+      { max: 2000,  step: 500 },
+      { max: 4000,  step: 1000 },
+      { max: 6000,  step: 1000 },
+      { max: 8000,  step: 2000 },
+      { max: 10000, step: 2000 },
+      { max: 15000, step: 3000 },
+      { max: 25000, step: 5000 },
+      { max: 50000, step: 10000 },
+      { max: 70000, step: 10000 }
+    ];
+
+    let yScaleMode = 'auto';
+    let currentLevelIdx = 0;
+    let lowSinceTime = 0;
+    const SCALE_DOWN_DELAY_MS = 2000; // หน่วง 2 วินาทีก่อนลดสเกลลง
+
+function createScales(yMax, yStep) {
+      return {
+        x: {
+          type: 'linear',
+          min: 380,
+          max: 700,
+          offset: false,
+          title: { display: true, text: 'Wavelength (nm)' },
+          grid: {
+            color: 'rgba(0,0,0,0.08)',
+            offset: false
+          }
+        },
+        y: {
+          min: 0,
+          max: yMax,
+          title: { display: true, text: 'Raw Intensity' },
+          grid: { color: 'rgba(0,0,0,0.08)' },
+          ticks: {
+            stepSize: yStep,
+            autoSkip: false
+          }
+        }
+      };
+    }
 
     const barChart = new Chart(document.getElementById('barChart'), {
       type: 'bar',
@@ -119,9 +164,19 @@ const char index_html[] PROGMEM = R"rawliteral(
         animation: false,
         plugins: {
           title: { display: true, text: '1. Discrete Bar Chart (ค่าจริงจากเซนเซอร์)', font: { size: 15 } },
-          legend: { display: false }
+          legend: {
+            display: true,
+            onClick: () => {},
+            labels: {
+              generateLabels: () => [
+                { text: 'Blue (465nm)', fillStyle: 'rgba(31,119,180,0.85)', strokeStyle: '#000', lineWidth: 1 },
+                { text: 'Green (525nm)', fillStyle: 'rgba(44,160,44,0.85)', strokeStyle: '#000', lineWidth: 1 },
+                { text: 'Red (615nm)', fillStyle: 'rgba(214,39,40,0.85)', strokeStyle: '#000', lineWidth: 1 }
+              ]
+            }
+          }
         },
-        scales: commonScales
+        scales: createScales(Y_LEVELS[0].max, Y_LEVELS[0].step)
       }
     });
 
@@ -154,11 +209,63 @@ const char index_html[] PROGMEM = R"rawliteral(
         maintainAspectRatio: false,
         animation: false,
         plugins: {
-          title: { display: true, text: '2. Approximated Spectral Curve (ประมาณการ)', font: { size: 15 } }
+          title: { display: true, text: '2. Approximated Spectral Curve (ประมาณการ)', font: { size: 15 } },
+          legend: { display: true }
         },
-        scales: commonScales
+        scales: createScales(Y_LEVELS[0].max, Y_LEVELS[0].step)
       }
     });
+
+    function getTargetYScale(peak) {
+      if (yScaleMode !== 'auto') {
+        const fixedMax = Number(yScaleMode);
+        const found = Y_LEVELS.find(l => l.max === fixedMax);
+        return found || { max: fixedMax, step: fixedMax / 5 };
+      }
+
+      // ขยายขึ้นทันทีเมื่อค่าเกิน 90% ของเพดานปัจจุบัน
+      if (peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
+        while (currentLevelIdx < Y_LEVELS.length - 1 && peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
+          currentLevelIdx++;
+        }
+        lowSinceTime = 0;
+        return Y_LEVELS[currentLevelIdx];
+      }
+
+      // ลดสเกลลงเมื่อค่าต่ำกว่า 70% ของระดับที่ต่ำกว่าต่อเนื่องครบ 2 วินาที
+      if (currentLevelIdx > 0 && peak < Y_LEVELS[currentLevelIdx - 1].max * 0.70) {
+        if (lowSinceTime === 0) {
+          lowSinceTime = Date.now();
+        } else if (Date.now() - lowSinceTime >= SCALE_DOWN_DELAY_MS) {
+          while (currentLevelIdx > 0 && peak < Y_LEVELS[currentLevelIdx - 1].max * 0.70) {
+            currentLevelIdx--;
+          }
+          lowSinceTime = 0;
+        }
+      } else {
+        lowSinceTime = 0;
+      }
+
+      return Y_LEVELS[currentLevelIdx];
+    }
+
+    function applyYScale(yMax, yStep) {
+      [barChart, curveChart].forEach(chart => {
+        chart.options.scales.y.max = yMax;
+        chart.options.scales.y.ticks.stepSize = yStep;
+      });
+    }
+
+    function onYScaleChange(val) {
+      yScaleMode = val;
+      lowSinceTime = 0;
+      if (val !== 'auto') {
+        const cfg = getTargetYScale(0);
+        applyYScale(cfg.max, cfg.step);
+        barChart.update();
+        curveChart.update();
+      }
+    }
 
     function rgbToHex(r, g, b) {
       return '#' + [r, g, b]
@@ -242,6 +349,11 @@ const char index_html[] PROGMEM = R"rawliteral(
           document.getElementById('swatch').style.backgroundColor = `rgb(${d.rgb.r}, ${d.rgb.g}, ${d.rgb.b})`;
           document.getElementById('satWarn').style.display = d.saturated ? 'inline' : 'none';
         }
+
+        // คำนวณและล็อกสเกลแกน Y ให้เท่ากันทั้ง 2 กราฟ
+        const peak = Math.max(d.raw.r, d.raw.g, d.raw.b);
+        const yCfg = getTargetYScale(peak);
+        applyYScale(yCfg.max, yCfg.step);
 
         barChart.data.datasets[0].data = [
           {x: 465, y: d.raw.b},
