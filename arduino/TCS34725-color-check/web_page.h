@@ -46,20 +46,44 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div class="controls">
     <button id="toggleBtn" onclick="togglePause()">Pause</button>
     <label>
+      Gain:
+      <select id="gainSelect" onchange="updateSensorConfig()">
+        <option value="1">1X</option>
+        <option value="4">4X</option>
+        <option value="16">16X</option>
+        <option value="60" selected>60X (แสงน้อยมาก)</option>
+      </select>
+    </label>
+    <label>
+      Integration:
+      <select id="intSelect" onchange="updateSensorConfig()">
+        <option value="3">2.4 ms</option>
+        <option value="24">24 ms</option>
+        <option value="50">50 ms</option>
+        <option value="101">101 ms</option>
+        <option value="154">154 ms</option>
+        <option value="614" selected>614 ms (แสงน้อยมาก)</option>
+      </select>
+    </label>
+    <label>
       Y-Axis Scale:
       <select id="yScaleSelect" onchange="onYScaleChange(this.value)">
         <option value="auto" selected>Auto (Smooth)</option>
+        <option value="50">Fix: 50</option>
+        <option value="100">Fix: 100</option>
+        <option value="250">Fix: 250</option>
+        <option value="500">Fix: 500</option>
         <option value="1000">Fix: 1,000</option>
         <option value="2000">Fix: 2,000</option>
         <option value="4000">Fix: 4,000</option>
         <option value="6000">Fix: 6,000</option>
         <option value="10000">Fix: 10,000</option>
-        <option value="25000">Fix: 25,000 (Max 50ms)</option>
+        <option value="25000">Fix: 25,000</option>
         <option value="70000">Fix: 70,000 (Max 16-bit)</option>
       </select>
     </label>
     <span>API: <a href="/api/data" target="_blank">/api/data</a></span>
-    <span id="satWarn" class="warn">⚠️ ค่าแสงทะลุเพดาน (Saturated) กรุณาขยับหลอดออกห่าง</span>
+    <span id="satWarn" class="warn">⚠️ ค่าแสงทะลุเพดาน (Saturated) กรุณาลด Gain/Integration หรือขยับหลอดออกห่าง</span>
   </div>
 
   <!-- แผงควบคุม RGB LED บนบอร์ด -->
@@ -100,9 +124,14 @@ const char index_html[] PROGMEM = R"rawliteral(
     let paused = false;
     let currentLedMode = 'auto';
     let lastUserPickTime = 0;
+    let lastConfigChangeTime = 0;
 
-    // ระดับสเกลแกน Y ที่หารลงตัวเพื่อให้เส้นย่อยทั้ง 2 กราฟตรงกันเป๊ะ
+    // ระดับสเกลแกน Y ตั้งแต่แสงน้อยมาก (50) ไปจนถึงเต็ม 16-bit (70,000)
     const Y_LEVELS = [
+      { max: 50,    step: 10 },
+      { max: 100,   step: 20 },
+      { max: 250,   step: 50 },
+      { max: 500,   step: 100 },
       { max: 1000,  step: 200 },
       { max: 2000,  step: 500 },
       { max: 4000,  step: 1000 },
@@ -116,11 +145,11 @@ const char index_html[] PROGMEM = R"rawliteral(
     ];
 
     let yScaleMode = 'auto';
-    let currentLevelIdx = 0;
+    let currentLevelIdx = 4; // เริ่มที่ 1,000 แล้วค่อยปรับลงอัตโนมัติถ้าค่าน้อย
     let lowSinceTime = 0;
-    const SCALE_DOWN_DELAY_MS = 2000; // หน่วง 2 วินาทีก่อนลดสเกลลง
+    const SCALE_DOWN_DELAY_MS = 2000;
 
-function createScales(yMax, yStep) {
+    function createScales(yMax, yStep) {
       return {
         x: {
           type: 'linear',
@@ -176,7 +205,7 @@ function createScales(yMax, yStep) {
             }
           }
         },
-        scales: createScales(Y_LEVELS[0].max, Y_LEVELS[0].step)
+        scales: createScales(Y_LEVELS[currentLevelIdx].max, Y_LEVELS[currentLevelIdx].step)
       }
     });
 
@@ -212,9 +241,16 @@ function createScales(yMax, yStep) {
           title: { display: true, text: '2. Approximated Spectral Curve (ประมาณการ)', font: { size: 15 } },
           legend: { display: true }
         },
-        scales: createScales(Y_LEVELS[0].max, Y_LEVELS[0].step)
+        scales: createScales(Y_LEVELS[currentLevelIdx].max, Y_LEVELS[currentLevelIdx].step)
       }
     });
+
+    async function updateSensorConfig() {
+      lastConfigChangeTime = Date.now();
+      const gain = document.getElementById('gainSelect').value;
+      const intMs = document.getElementById('intSelect').value;
+      await fetch(`/api/config?gain=${gain}&int_ms=${intMs}`);
+    }
 
     function getTargetYScale(peak) {
       if (yScaleMode !== 'auto') {
@@ -223,7 +259,6 @@ function createScales(yMax, yStep) {
         return found || { max: fixedMax, step: fixedMax / 5 };
       }
 
-      // ขยายขึ้นทันทีเมื่อค่าเกิน 90% ของเพดานปัจจุบัน
       if (peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
         while (currentLevelIdx < Y_LEVELS.length - 1 && peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
           currentLevelIdx++;
@@ -232,7 +267,6 @@ function createScales(yMax, yStep) {
         return Y_LEVELS[currentLevelIdx];
       }
 
-      // ลดสเกลลงเมื่อค่าต่ำกว่า 70% ของระดับที่ต่ำกว่าต่อเนื่องครบ 2 วินาที
       if (currentLevelIdx > 0 && peak < Y_LEVELS[currentLevelIdx - 1].max * 0.70) {
         if (lowSinceTime === 0) {
           lowSinceTime = Date.now();
@@ -319,6 +353,14 @@ function createScales(yMax, yStep) {
 
         const alertBox = document.getElementById('sensorAlert');
 
+        // ซิงค์ค่า Gain / Integration Time จากบอร์ด
+        if (d.config && (Date.now() - lastConfigChangeTime > 800)) {
+          const gSel = document.getElementById('gainSelect');
+          const iSel = document.getElementById('intSelect');
+          if (Number(gSel.value) !== d.config.gain) gSel.value = String(d.config.gain);
+          if (Number(iSel.value) !== d.config.integration_ms) iSel.value = String(d.config.integration_ms);
+        }
+
         if (d.led) {
           if (d.led.mode !== currentLedMode) {
             updateLedUI(d.led.mode);
@@ -350,7 +392,6 @@ function createScales(yMax, yStep) {
           document.getElementById('satWarn').style.display = d.saturated ? 'inline' : 'none';
         }
 
-        // คำนวณและล็อกสเกลแกน Y ให้เท่ากันทั้ง 2 กราฟ
         const peak = Math.max(d.raw.r, d.raw.g, d.raw.b);
         const yCfg = getTargetYScale(peak);
         applyYScale(yCfg.max, yCfg.step);
