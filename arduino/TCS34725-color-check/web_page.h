@@ -5,7 +5,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32-S3 TCS34725 Spectral Monitor</title>
+  <title>ESP32-S3 Dual TCS34725 Spectral Monitor</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     * { box-sizing: border-box; }
@@ -17,31 +17,31 @@ const char index_html[] PROGMEM = R"rawliteral(
     button.secondary { background: #6c757d; }
     button.active-mode { background: #198754; font-weight: bold; }
     select { padding: 7px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; background: #fff; cursor: pointer; }
-    .alert-banner { display: none; background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: bold; }
-    .panel { background: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+    .panel { background: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
     .panel-title { font-weight: bold; font-size: 14px; }
     .manual-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .manual-group.disabled { opacity: 0.45; pointer-events: none; }
     input[type="color"] { width: 42px; height: 34px; border: none; background: none; cursor: pointer; padding: 0; }
     .preset-btn { width: 26px; height: 26px; border-radius: 50%; border: 1px solid #999; padding: 0; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .card { background: #fff; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+    .sensor-section { background: #eef1f5; padding: 16px; border-radius: 10px; margin-bottom: 22px; border: 1px solid #dce1e8; }
+    .sensor-header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+    .sensor-header h3 { margin: 0; font-size: 18px; }
+    .badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: bold; }
+    .badge-ok { background: #d1e7dd; color: #0f5132; }
+    .badge-err { background: #f8d7da; color: #842029; }
+    .badge-warn { background: #fff3cd; color: #664d03; display: none; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { background: #fff; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
     .card .label { font-size: 12px; color: #666; }
-    .card .val { font-size: 20px; font-weight: bold; margin-top: 4px; }
+    .card .val { font-size: 19px; font-weight: bold; margin-top: 4px; }
     .swatch { width: 100%; height: 28px; border-radius: 6px; border: 1px solid #ccc; margin-top: 4px; }
-    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px; }
-    .chart-box { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); min-width: 0; }
-    .chart-wrapper { position: relative; width: 100%; height: 320px; }
-    .warn { color: #d62728; font-weight: bold; display: none; }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
+    .chart-box { background: #fff; padding: 14px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); min-width: 0; }
+    .chart-wrapper { position: relative; width: 100%; height: 290px; }
   </style>
 </head>
 <body>
-  <h2>TCS34725 LED Spectral Monitor (ESP32-S3)</h2>
-
-  <!-- แถบแจ้งเตือนเมื่อเซนเซอร์หลุด -->
-  <div id="sensorAlert" class="alert-banner">
-    ❌ ไม่พบเซนเซอร์ TCS34725 (ถูกถอดออกหรือสาย I2C หลุด) — กำลังรอการเชื่อมต่อใหม่...
-  </div>
+  <h2>Dual TCS34725 LED Spectral Monitor (ESP32-S3)</h2>
 
   <div class="controls">
     <button id="toggleBtn" onclick="togglePause()">Pause</button>
@@ -83,13 +83,13 @@ const char index_html[] PROGMEM = R"rawliteral(
       </select>
     </label>
     <span>API: <a href="/api/data" target="_blank">/api/data</a></span>
-    <span id="satWarn" class="warn">⚠️ ค่าแสงทะลุเพดาน (Saturated) กรุณาลด Gain/Integration หรือขยับหลอดออกห่าง</span>
   </div>
 
   <!-- แผงควบคุม RGB LED บนบอร์ด -->
   <div class="panel">
     <span class="panel-title">Onboard RGB LED:</span>
-    <button id="btnAuto" class="active-mode" onclick="setLedMode('auto')">Auto (ตามเซนเซอร์)</button>
+    <button id="btnAuto1" class="active-mode" onclick="setLedMode('auto')">Auto (Sensor 1)</button>
+    <button id="btnAuto2" class="secondary" onclick="setLedMode('auto2')">Auto (Sensor 2)</button>
     <button id="btnManual" class="secondary" onclick="setLedMode('manual')">Manual (เลือกสีเอง)</button>
 
     <div id="manualControls" class="manual-group disabled">
@@ -103,20 +103,43 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
-  <div class="cards">
-    <div class="card"><div class="label">Color Preview</div><div id="swatch" class="swatch"></div></div>
-    <div class="card"><div class="label">Raw (R / G / B / C)</div><div id="rawVal" class="val">-</div></div>
-    <div class="card"><div class="label">RGB (0-255)</div><div id="rgbVal" class="val">-</div></div>
-    <div class="card"><div class="label">Color Temp</div><div id="cctVal" class="val">- K</div></div>
-    <div class="card"><div class="label">Luminance</div><div id="luxVal" class="val">- Lux</div></div>
+  <!-- ================= Sensor 1 (GPIO 4, 5) ================= -->
+  <div class="sensor-section">
+    <div class="sensor-header">
+      <h3>Sensor 1 (SDA: 4, SCL: 5)</h3>
+      <span id="s1Badge" class="badge badge-ok">Connected</span>
+      <span id="s1Sat" class="badge badge-warn">⚠️ ค่าแสงทะลุเพดาน (Saturated)</span>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">Color Preview</div><div id="s1Swatch" class="swatch"></div></div>
+      <div class="card"><div class="label">Raw (R / G / B / C)</div><div id="s1Raw" class="val">-</div></div>
+      <div class="card"><div class="label">RGB (0-255)</div><div id="s1Rgb" class="val">-</div></div>
+      <div class="card"><div class="label">Color Temp</div><div id="s1Cct" class="val">- K</div></div>
+      <div class="card"><div class="label">Luminance</div><div id="s1Lux" class="val">- Lux</div></div>
+    </div>
+    <div class="charts">
+      <div class="chart-box"><div class="chart-wrapper"><canvas id="s1Bar"></canvas></div></div>
+      <div class="chart-box"><div class="chart-wrapper"><canvas id="s1Curve"></canvas></div></div>
+    </div>
   </div>
 
-  <div class="charts">
-    <div class="chart-box">
-      <div class="chart-wrapper"><canvas id="barChart"></canvas></div>
+  <!-- ================= Sensor 2 (GPIO 6, 7) ================= -->
+  <div class="sensor-section">
+    <div class="sensor-header">
+      <h3>Sensor 2 (SDA: 6, SCL: 7)</h3>
+      <span id="s2Badge" class="badge badge-ok">Connected</span>
+      <span id="s2Sat" class="badge badge-warn">⚠️ ค่าแสงทะลุเพดาน (Saturated)</span>
     </div>
-    <div class="chart-box">
-      <div class="chart-wrapper"><canvas id="curveChart"></canvas></div>
+    <div class="cards">
+      <div class="card"><div class="label">Color Preview</div><div id="s2Swatch" class="swatch"></div></div>
+      <div class="card"><div class="label">Raw (R / G / B / C)</div><div id="s2Raw" class="val">-</div></div>
+      <div class="card"><div class="label">RGB (0-255)</div><div id="s2Rgb" class="val">-</div></div>
+      <div class="card"><div class="label">Color Temp</div><div id="s2Cct" class="val">- K</div></div>
+      <div class="card"><div class="label">Luminance</div><div id="s2Lux" class="val">- Lux</div></div>
+    </div>
+    <div class="charts">
+      <div class="chart-box"><div class="chart-wrapper"><canvas id="s2Bar"></canvas></div></div>
+      <div class="chart-box"><div class="chart-wrapper"><canvas id="s2Curve"></canvas></div></div>
     </div>
   </div>
 
@@ -126,7 +149,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     let lastUserPickTime = 0;
     let lastConfigChangeTime = 0;
 
-    // ระดับสเกลแกน Y ตั้งแต่แสงน้อยมาก (50) ไปจนถึงเต็ม 16-bit (70,000)
     const Y_LEVELS = [
       { max: 50,    step: 10 },
       { max: 100,   step: 20 },
@@ -145,8 +167,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     ];
 
     let yScaleMode = 'auto';
-    let currentLevelIdx = 4; // เริ่มที่ 1,000 แล้วค่อยปรับลงอัตโนมัติถ้าค่าน้อย
-    let lowSinceTime = 0;
     const SCALE_DOWN_DELAY_MS = 2000;
 
     function createScales(yMax, yStep) {
@@ -157,134 +177,131 @@ const char index_html[] PROGMEM = R"rawliteral(
           max: 700,
           offset: false,
           title: { display: true, text: 'Wavelength (nm)' },
-          grid: {
-            color: 'rgba(0,0,0,0.08)',
-            offset: false
-          }
+          grid: { color: 'rgba(0,0,0,0.08)', offset: false }
         },
         y: {
           min: 0,
           max: yMax,
           title: { display: true, text: 'Raw Intensity' },
           grid: { color: 'rgba(0,0,0,0.08)' },
-          ticks: {
-            stepSize: yStep,
-            autoSkip: false
-          }
+          ticks: { stepSize: yStep, autoSkip: false }
         }
       };
     }
 
-    const barChart = new Chart(document.getElementById('barChart'), {
-      type: 'bar',
-      data: {
-        datasets: [{
-          label: 'Raw Intensity',
-          data: [{x: 465, y: 0}, {x: 525, y: 0}, {x: 615, y: 0}],
-          backgroundColor: ['rgba(31,119,180,0.85)', 'rgba(44,160,44,0.85)', 'rgba(214,39,40,0.85)'],
-          borderColor: '#000',
-          borderWidth: 1,
-          barThickness: 28
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: {
-          title: { display: true, text: '1. Discrete Bar Chart (ค่าจริงจากเซนเซอร์)', font: { size: 15 } },
-          legend: {
-            display: true,
-            onClick: () => {},
-            labels: {
-              generateLabels: () => [
-                { text: 'Blue (465nm)', fillStyle: 'rgba(31,119,180,0.85)', strokeStyle: '#000', lineWidth: 1 },
-                { text: 'Green (525nm)', fillStyle: 'rgba(44,160,44,0.85)', strokeStyle: '#000', lineWidth: 1 },
-                { text: 'Red (615nm)', fillStyle: 'rgba(214,39,40,0.85)', strokeStyle: '#000', lineWidth: 1 }
-              ]
-            }
-          }
-        },
-        scales: createScales(Y_LEVELS[currentLevelIdx].max, Y_LEVELS[currentLevelIdx].step)
-      }
-    });
-
-    const curveChart = new Chart(document.getElementById('curveChart'), {
-      type: 'line',
-      data: {
-        datasets: [
-          {
-            label: 'Estimated Curve',
-            data: [{x: 380, y: 0}, {x: 465, y: 0}, {x: 525, y: 0}, {x: 615, y: 0}, {x: 700, y: 0}],
-            borderColor: 'teal',
-            backgroundColor: 'rgba(0, 128, 128, 0.2)',
-            borderWidth: 2,
-            fill: true,
-            cubicInterpolationMode: 'monotone',
-            tension: 0.4,
-            pointRadius: 0
-          },
-          {
-            label: 'Measured Points',
-            type: 'scatter',
+    function createSensorView(prefix, labelName) {
+      const initLevel = Y_LEVELS[4]; // เริ่มที่ 1,000
+      const barChart = new Chart(document.getElementById(prefix + 'Bar'), {
+        type: 'bar',
+        data: {
+          datasets: [{
+            label: 'Raw Intensity',
             data: [{x: 465, y: 0}, {x: 525, y: 0}, {x: 615, y: 0}],
-            backgroundColor: ['#1f77b4', '#2ca02c', '#d62728'],
-            pointRadius: 6
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: {
-          title: { display: true, text: '2. Approximated Spectral Curve (ประมาณการ)', font: { size: 15 } },
-          legend: { display: true }
+            backgroundColor: ['rgba(31,119,180,0.85)', 'rgba(44,160,44,0.85)', 'rgba(214,39,40,0.85)'],
+            borderColor: '#000',
+            borderWidth: 1,
+            barThickness: 28
+          }]
         },
-        scales: createScales(Y_LEVELS[currentLevelIdx].max, Y_LEVELS[currentLevelIdx].step)
-      }
-    });
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            title: { display: true, text: `${labelName} — Discrete Bar Chart`, font: { size: 14 } },
+            legend: {
+              display: true,
+              onClick: () => {},
+              labels: {
+                generateLabels: () => [
+                  { text: 'Blue (465nm)', fillStyle: 'rgba(31,119,180,0.85)', strokeStyle: '#000', lineWidth: 1 },
+                  { text: 'Green (525nm)', fillStyle: 'rgba(44,160,44,0.85)', strokeStyle: '#000', lineWidth: 1 },
+                  { text: 'Red (615nm)', fillStyle: 'rgba(214,39,40,0.85)', strokeStyle: '#000', lineWidth: 1 }
+                ]
+              }
+            }
+          },
+          scales: createScales(initLevel.max, initLevel.step)
+        }
+      });
 
-    async function updateSensorConfig() {
-      lastConfigChangeTime = Date.now();
-      const gain = document.getElementById('gainSelect').value;
-      const intMs = document.getElementById('intSelect').value;
-      await fetch(`/api/config?gain=${gain}&int_ms=${intMs}`);
+      const curveChart = new Chart(document.getElementById(prefix + 'Curve'), {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'Estimated Curve',
+              data: [{x: 380, y: 0}, {x: 465, y: 0}, {x: 525, y: 0}, {x: 615, y: 0}, {x: 700, y: 0}],
+              borderColor: 'teal',
+              backgroundColor: 'rgba(0, 128, 128, 0.2)',
+              borderWidth: 2,
+              fill: true,
+              cubicInterpolationMode: 'monotone',
+              tension: 0.4,
+              pointRadius: 0
+            },
+            {
+              label: 'Measured Points',
+              type: 'scatter',
+              data: [{x: 465, y: 0}, {x: 525, y: 0}, {x: 615, y: 0}],
+              backgroundColor: ['#1f77b4', '#2ca02c', '#d62728'],
+              pointRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            title: { display: true, text: `${labelName} — Approximated Spectral Curve`, font: { size: 14 } },
+            legend: { display: true }
+          },
+          scales: createScales(initLevel.max, initLevel.step)
+        }
+      });
+
+      return { prefix, barChart, curveChart, levelIdx: 4, lowSinceTime: 0 };
     }
 
-    function getTargetYScale(peak) {
+    const views = [
+      createSensorView('s1', 'Sensor 1'),
+      createSensorView('s2', 'Sensor 2')
+    ];
+
+    function getTargetYScale(view, peak) {
       if (yScaleMode !== 'auto') {
         const fixedMax = Number(yScaleMode);
         const found = Y_LEVELS.find(l => l.max === fixedMax);
         return found || { max: fixedMax, step: fixedMax / 5 };
       }
 
-      if (peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
-        while (currentLevelIdx < Y_LEVELS.length - 1 && peak > Y_LEVELS[currentLevelIdx].max * 0.90) {
-          currentLevelIdx++;
+      if (peak > Y_LEVELS[view.levelIdx].max * 0.90) {
+        while (view.levelIdx < Y_LEVELS.length - 1 && peak > Y_LEVELS[view.levelIdx].max * 0.90) {
+          view.levelIdx++;
         }
-        lowSinceTime = 0;
-        return Y_LEVELS[currentLevelIdx];
+        view.lowSinceTime = 0;
+        return Y_LEVELS[view.levelIdx];
       }
 
-      if (currentLevelIdx > 0 && peak < Y_LEVELS[currentLevelIdx - 1].max * 0.70) {
-        if (lowSinceTime === 0) {
-          lowSinceTime = Date.now();
-        } else if (Date.now() - lowSinceTime >= SCALE_DOWN_DELAY_MS) {
-          while (currentLevelIdx > 0 && peak < Y_LEVELS[currentLevelIdx - 1].max * 0.70) {
-            currentLevelIdx--;
+      if (view.levelIdx > 0 && peak < Y_LEVELS[view.levelIdx - 1].max * 0.70) {
+        if (view.lowSinceTime === 0) {
+          view.lowSinceTime = Date.now();
+        } else if (Date.now() - view.lowSinceTime >= SCALE_DOWN_DELAY_MS) {
+          while (view.levelIdx > 0 && peak < Y_LEVELS[view.levelIdx - 1].max * 0.70) {
+            view.levelIdx--;
           }
-          lowSinceTime = 0;
+          view.lowSinceTime = 0;
         }
       } else {
-        lowSinceTime = 0;
+        view.lowSinceTime = 0;
       }
 
-      return Y_LEVELS[currentLevelIdx];
+      return Y_LEVELS[view.levelIdx];
     }
 
-    function applyYScale(yMax, yStep) {
-      [barChart, curveChart].forEach(chart => {
+    function applyYScale(view, yMax, yStep) {
+      [view.barChart, view.curveChart].forEach(chart => {
         chart.options.scales.y.max = yMax;
         chart.options.scales.y.ticks.stepSize = yStep;
       });
@@ -292,13 +309,22 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     function onYScaleChange(val) {
       yScaleMode = val;
-      lowSinceTime = 0;
-      if (val !== 'auto') {
-        const cfg = getTargetYScale(0);
-        applyYScale(cfg.max, cfg.step);
-        barChart.update();
-        curveChart.update();
-      }
+      views.forEach(v => {
+        v.lowSinceTime = 0;
+        if (val !== 'auto') {
+          const cfg = getTargetYScale(v, 0);
+          applyYScale(v, cfg.max, cfg.step);
+          v.barChart.update();
+          v.curveChart.update();
+        }
+      });
+    }
+
+    async function updateSensorConfig() {
+      lastConfigChangeTime = Date.now();
+      const gain = document.getElementById('gainSelect').value;
+      const intMs = document.getElementById('intSelect').value;
+      await fetch(`/api/config?gain=${gain}&int_ms=${intMs}`);
     }
 
     function rgbToHex(r, g, b) {
@@ -316,18 +342,18 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     function updateLedUI(mode) {
       currentLedMode = mode;
-      const isAuto = (mode === 'auto');
-      document.getElementById('btnAuto').className = isAuto ? 'active-mode' : 'secondary';
-      document.getElementById('btnManual').className = !isAuto ? 'active-mode' : 'secondary';
-      document.getElementById('manualControls').classList.toggle('disabled', isAuto);
+      document.getElementById('btnAuto1').className = (mode === 'auto') ? 'active-mode' : 'secondary';
+      document.getElementById('btnAuto2').className = (mode === 'auto2') ? 'active-mode' : 'secondary';
+      document.getElementById('btnManual').className = (mode === 'manual') ? 'active-mode' : 'secondary';
+      document.getElementById('manualControls').classList.toggle('disabled', mode !== 'manual');
     }
 
     async function setLedMode(mode) {
       updateLedUI(mode);
-      if (mode === 'auto') {
-        await fetch('/api/led?mode=auto');
-      } else {
+      if (mode === 'manual') {
         pickColor(document.getElementById('colorPicker').value);
+      } else {
+        await fetch(`/api/led?mode=${mode}`);
       }
     }
 
@@ -345,15 +371,63 @@ const char index_html[] PROGMEM = R"rawliteral(
       await fetch(`/api/led?mode=manual&r=${r}&g=${g}&b=${b}`);
     }
 
+    function updateSensorSection(view, s) {
+      const p = view.prefix;
+      const badge = document.getElementById(p + 'Badge');
+      const sat = document.getElementById(p + 'Sat');
+
+      if (!s.connected) {
+        badge.textContent = '❌ Disconnected (รอเชื่อมต่อใหม่...)';
+        badge.className = 'badge badge-err';
+        sat.style.display = 'none';
+        document.getElementById(p + 'Raw').textContent = 'Disconnected';
+        document.getElementById(p + 'Rgb').textContent = '-';
+        document.getElementById(p + 'Cct').textContent = '- K';
+        document.getElementById(p + 'Lux').textContent = '- Lux';
+        document.getElementById(p + 'Swatch').style.backgroundColor = '#e9ecef';
+      } else {
+        badge.textContent = '● Connected';
+        badge.className = 'badge badge-ok';
+        sat.style.display = s.saturated ? 'inline-block' : 'none';
+        document.getElementById(p + 'Raw').textContent = `${s.raw.r} / ${s.raw.g} / ${s.raw.b} / ${s.raw.c}`;
+        document.getElementById(p + 'Rgb').textContent = `${s.rgb.r}, ${s.rgb.g}, ${s.rgb.b}`;
+        document.getElementById(p + 'Cct').textContent = `${s.color_temp_k} K`;
+        document.getElementById(p + 'Lux').textContent = `${s.lux} Lux`;
+        document.getElementById(p + 'Swatch').style.backgroundColor = `rgb(${s.rgb.r}, ${s.rgb.g}, ${s.rgb.b})`;
+      }
+
+      const peak = Math.max(s.raw.r, s.raw.g, s.raw.b);
+      const yCfg = getTargetYScale(view, peak);
+      applyYScale(view, yCfg.max, yCfg.step);
+
+      view.barChart.data.datasets[0].data = [
+        {x: 465, y: s.raw.b},
+        {x: 525, y: s.raw.g},
+        {x: 615, y: s.raw.r}
+      ];
+      view.barChart.update();
+
+      view.curveChart.data.datasets[0].data = [
+        {x: 380, y: 0},
+        {x: 465, y: s.raw.b},
+        {x: 525, y: s.raw.g},
+        {x: 615, y: s.raw.r},
+        {x: 700, y: 0}
+      ];
+      view.curveChart.data.datasets[1].data = [
+        {x: 465, y: s.raw.b},
+        {x: 525, y: s.raw.g},
+        {x: 615, y: s.raw.r}
+      ];
+      view.curveChart.update();
+    }
+
     async function fetchData() {
       if (paused) return;
       try {
         const res = await fetch('/api/data');
         const d = await res.json();
 
-        const alertBox = document.getElementById('sensorAlert');
-
-        // ซิงค์ค่า Gain / Integration Time จากบอร์ด
         if (d.config && (Date.now() - lastConfigChangeTime > 800)) {
           const gSel = document.getElementById('gainSelect');
           const iSel = document.getElementById('intSelect');
@@ -374,48 +448,10 @@ const char index_html[] PROGMEM = R"rawliteral(
           }
         }
 
-        if (!d.sensor_connected) {
-          alertBox.style.display = 'block';
-          document.getElementById('rawVal').textContent = 'Disconnected';
-          document.getElementById('rgbVal').textContent = '-';
-          document.getElementById('cctVal').textContent = '- K';
-          document.getElementById('luxVal').textContent = '- Lux';
-          document.getElementById('swatch').style.backgroundColor = '#e9ecef';
-          document.getElementById('satWarn').style.display = 'none';
-        } else {
-          alertBox.style.display = 'none';
-          document.getElementById('rawVal').textContent = `${d.raw.r} / ${d.raw.g} / ${d.raw.b} / ${d.raw.c}`;
-          document.getElementById('rgbVal').textContent = `${d.rgb.r}, ${d.rgb.g}, ${d.rgb.b}`;
-          document.getElementById('cctVal').textContent = `${d.color_temp_k} K`;
-          document.getElementById('luxVal').textContent = `${d.lux} Lux`;
-          document.getElementById('swatch').style.backgroundColor = `rgb(${d.rgb.r}, ${d.rgb.g}, ${d.rgb.b})`;
-          document.getElementById('satWarn').style.display = d.saturated ? 'inline' : 'none';
+        if (d.sensors && d.sensors.length >= 2) {
+          updateSensorSection(views[0], d.sensors[0]);
+          updateSensorSection(views[1], d.sensors[1]);
         }
-
-        const peak = Math.max(d.raw.r, d.raw.g, d.raw.b);
-        const yCfg = getTargetYScale(peak);
-        applyYScale(yCfg.max, yCfg.step);
-
-        barChart.data.datasets[0].data = [
-          {x: 465, y: d.raw.b},
-          {x: 525, y: d.raw.g},
-          {x: 615, y: d.raw.r}
-        ];
-        barChart.update();
-
-        curveChart.data.datasets[0].data = [
-          {x: 380, y: 0},
-          {x: 465, y: d.raw.b},
-          {x: 525, y: d.raw.g},
-          {x: 615, y: d.raw.r},
-          {x: 700, y: 0}
-        ];
-        curveChart.data.datasets[1].data = [
-          {x: 465, y: d.raw.b},
-          {x: 525, y: d.raw.g},
-          {x: 615, y: d.raw.r}
-        ];
-        curveChart.update();
       } catch (err) {
         console.error('Fetch error:', err);
       }
